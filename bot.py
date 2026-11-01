@@ -43,61 +43,105 @@ class CloseView(discord.ui.View):
         await interaction.channel.delete(reason=f"Ticket chiuso da {interaction.user}")
 
 
+# Tipi di ticket. "ticket:open" resta l'ID di Assistenza, così i pannelli
+# già pubblicati continuano a funzionare.
+TICKET_TYPES = {
+    "assistenza": {
+        "label": "Assistenza",
+        "emoji": "🛠️",
+        "style": discord.ButtonStyle.secondary,
+        "custom_id": "ticket:open",
+        "prefix": "assistenza",
+        "welcome": "Descrivi il tuo problema, lo staff ti risponderà a breve.",
+    },
+    "clan": {
+        "label": "Provino Clan",
+        "emoji": "🛡️",
+        "style": discord.ButtonStyle.secondary,
+        "custom_id": "ticket:clan",
+        "prefix": "provino-clan",
+        "welcome": "Scrivi qui la tua richiesta per il provino clan, lo staff ti risponderà a breve.",
+    },
+    "staff": {
+        "label": "Provino Staff",
+        "emoji": "⚜️",
+        "style": discord.ButtonStyle.secondary,
+        "custom_id": "ticket:staff",
+        "prefix": "provino-staff",
+        "welcome": "Presentati e scrivi perché vuoi entrare nello staff, ti risponderemo a breve.",
+    },
+}
+
+
+async def create_ticket(interaction: discord.Interaction, kind: str):
+    cfg = TICKET_TYPES[kind]
+    guild = interaction.guild
+    user = interaction.user
+
+    # Un solo ticket aperto per tipo e per utente
+    existing = discord.utils.find(
+        lambda ch: (ch.topic or "").startswith(f"[{kind}]") and (ch.topic or "").endswith(f"({user.id})"),
+        guild.text_channels,
+    )
+    if existing:
+        await interaction.response.send_message(
+            f"Hai già un ticket di tipo {cfg['label']} aperto: {existing.mention}", ephemeral=True)
+        return
+
+    category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
+    if category is None:
+        category = await guild.create_category(CATEGORY_NAME)
+
+    staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        user: discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                          read_message_history=True),
+        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                              manage_channels=True),
+    }
+    if staff_role:
+        overwrites[staff_role] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True)
+
+    channel = await guild.create_text_channel(
+        name=f"{cfg['prefix']}-{user.name}",
+        category=category,
+        overwrites=overwrites,
+        topic=f"[{kind}] Ticket di {user} ({user.id})",
+    )
+
+    embed = discord.Embed(
+        title=f"{cfg['emoji']} {cfg['label']}",
+        description=f"Ciao {user.mention}! {cfg['welcome']}",
+        color=discord.Color.green(),
+    )
+    await channel.send(
+        content=staff_role.mention if staff_role else None,
+        embed=embed,
+        view=CloseView(),
+    )
+    await interaction.response.send_message(
+        f"Ticket creato: {channel.mention}", ephemeral=True)
+
+
+def make_ticket_callback(kind: str):
+    async def callback(interaction: discord.Interaction):
+        await create_ticket(interaction, kind)
+    return callback
+
+
 class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        btn = discord.ui.Button(label="🎫 Apri ticket",
-                                style=discord.ButtonStyle.primary,
-                                custom_id="ticket:open")
-        btn.callback = self.open
-        self.add_item(btn)
-
-    async def open(self, interaction: discord.Interaction):
-        guild = interaction.guild
-        user = interaction.user
-
-        existing = discord.utils.get(guild.text_channels, name=f"ticket-{user.name.lower()}")
-        if existing:
-            await interaction.response.send_message(
-                f"Hai già un ticket aperto: {existing.mention}", ephemeral=True)
-            return
-
-        category = discord.utils.get(guild.categories, name=CATEGORY_NAME)
-        if category is None:
-            category = await guild.create_category(CATEGORY_NAME)
-
-        staff_role = discord.utils.get(guild.roles, name=STAFF_ROLE_NAME)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            user: discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                              read_message_history=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                                  manage_channels=True),
-        }
-        if staff_role:
-            overwrites[staff_role] = discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, read_message_history=True)
-
-        channel = await guild.create_text_channel(
-            name=f"ticket-{user.name}",
-            category=category,
-            overwrites=overwrites,
-            topic=f"Ticket di {user} ({user.id})",
-        )
-
-        embed = discord.Embed(
-            title="Ticket aperto",
-            description=f"Ciao {user.mention}! Descrivi il tuo problema, lo staff ti risponderà a breve.",
-            color=discord.Color.green(),
-        )
-        await channel.send(
-            content=staff_role.mention if staff_role else None,
-            embed=embed,
-            view=CloseView(),
-        )
-        await interaction.response.send_message(
-            f"Ticket creato: {channel.mention}", ephemeral=True)
+        for kind, cfg in TICKET_TYPES.items():
+            btn = discord.ui.Button(label=cfg["label"],
+                                    emoji=cfg["emoji"],
+                                    style=cfg["style"],
+                                    custom_id=cfg["custom_id"])
+            btn.callback = make_ticket_callback(kind)
+            self.add_item(btn)
 
 
 # ---------------------------------------------------------------- /stats ---
@@ -246,7 +290,7 @@ async def stats(interaction: discord.Interaction, username: str):
 async def setup(interaction: discord.Interaction):
     embed = discord.Embed(
         title="Supporto",
-        description="Clicca il pulsante qui sotto per aprire un ticket.",
+        description="Scegli qui sotto il tipo di ticket che vuoi aprire.",
         color=discord.Color.blurple(),
     )
     await interaction.channel.send(embed=embed, view=TicketView())
