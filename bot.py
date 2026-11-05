@@ -2,6 +2,7 @@ import os
 import io
 import datetime
 import re
+import unicodedata
 import math
 import json
 import asyncio
@@ -1099,6 +1100,11 @@ async def setup_stats_error(interaction: discord.Interaction, error):
 
 # ------------------------------------------------------------------ /pex ---
 
+def norm_name(name: str) -> str:
+    """Normalizza i nomi con lettere Unicode decorative: '𝙘𝙝𝙖𝙩-𝙜𝙚𝙣𝙚𝙧𝙖𝙡𝙚' -> 'chat-generale'."""
+    return unicodedata.normalize("NFKC", name).lower()
+
+
 def role_key(name: str) -> str:
     """'👑 | owner' -> 'owner', '⭐utente' -> 'utente', 'Sr. admin' -> 'sr. admin'."""
     name = name.split("|")[-1].strip().lower()
@@ -1298,7 +1304,7 @@ def get_log_channel(guild: discord.Guild):
         # Se il registro è stato creato a mano (o il file di configurazione manca),
         # usa un canale con "ticket-log" nel nome
         channel = discord.utils.find(
-            lambda c: "ticket-log" in c.name.lower(), guild.text_channels)
+            lambda c: "ticket-log" in norm_name(c.name), guild.text_channels)
     return channel
 
 
@@ -1431,7 +1437,7 @@ def build_rules_embed(guild: discord.Guild) -> discord.Embed:
 async def regolamento(interaction: discord.Interaction):
     guild = interaction.guild
     channel = discord.utils.find(
-        lambda c: RULES_CHANNEL_KEYWORD in c.name.lower(), guild.text_channels)
+        lambda c: RULES_CHANNEL_KEYWORD in norm_name(c.name), guild.text_channels)
     if channel is None:
         await interaction.response.send_message(
             f"Non trovo nessun canale testuale con «{RULES_CHANNEL_KEYWORD}» nel nome.",
@@ -1787,7 +1793,7 @@ def find_ticket_panel_channel(guild: discord.Guild):
     """Canale del pannello ticket: ha 'ticket' nel nome, ma non è il log né un ticket aperto."""
     prefixes = tuple(f"{cfg['prefix']}-" for cfg in TICKET_TYPES.values())
     for ch in guild.text_channels:
-        name = ch.name.lower()
+        name = norm_name(ch.name)
         if WELCOME_TICKET_KEYWORD not in name or "log" in name or name.startswith(prefixes):
             continue
         if ch.category and ch.category.name == CATEGORY_NAME:
@@ -1799,14 +1805,14 @@ def find_ticket_panel_channel(guild: discord.Guild):
 async def send_welcome(member: discord.Member) -> None:
     guild = member.guild
     channel = discord.utils.find(
-        lambda c: WELCOME_CHANNEL_KEYWORD in c.name.lower(), guild.text_channels)
+        lambda c: WELCOME_CHANNEL_KEYWORD in norm_name(c.name), guild.text_channels)
     if channel is None:
         print(f"[benvenuto] Nessun canale con '{WELCOME_CHANNEL_KEYWORD}' nel nome in {guild.name}")
         return
 
     ticket = find_ticket_panel_channel(guild)
     rules = discord.utils.find(
-        lambda c: RULES_CHANNEL_KEYWORD in c.name.lower(), guild.text_channels)
+        lambda c: RULES_CHANNEL_KEYWORD in norm_name(c.name), guild.text_channels)
     ticket_text = f"in {ticket.mention}" if ticket else "dal pannello del supporto"
     rules_text = f"in {rules.mention}" if rules else f"nel canale «{RULES_CHANNEL_KEYWORD}»"
 
